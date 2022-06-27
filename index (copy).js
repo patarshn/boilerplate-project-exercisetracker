@@ -16,7 +16,7 @@ app.use(bodyParser.json());
 
 //Set Mongoose
 const mongoose = require('mongoose');
-// mongoose.Promise = global.Promise;
+mongoose.Promise = global.Promise;
 mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
 const { Schema } = mongoose;
 
@@ -28,8 +28,7 @@ const exerciseSchema = new Schema({
   user: {type : Schema.Types.ObjectId, ref: "User"},
   description: { type : String, required: true },
   duration: { type : Number, required: true },
-  dateObj: { type : Date, required: true },
-  date : { type : String, required: true }
+  date: { type : Date, required: true },
 });
 
 let User = mongoose.model('User', userSchema);
@@ -38,7 +37,6 @@ let Exercise = mongoose.model('Exercise', exerciseSchema);
 // Route
 app.use(function(req, res, next) {
   console.log(req.method,req.path);
-  console.log(req.query)
   next();
 });
 
@@ -104,7 +102,6 @@ app.post('/api/users/:_id/exercises', (req,res) => {
         exercise.description = description;
         exercise.duration = duration;
         exercise.date = date;
-        exercise.dateObj = date;
         exercise.user = data._id;
         exercise.save((err1,data1) => {
           if(err1){
@@ -140,7 +137,7 @@ app.post('/api/users/:_id/exercises', (req,res) => {
 
 app.get('/api/users/:_id/logs', (req,res) => {
   let _id = req.params._id;
-  let limit = 0;
+  let limit = {limit : Number.MAX_SAFE_INTEGER};
   let from;
   let to;
   let filter = {}
@@ -158,31 +155,40 @@ app.get('/api/users/:_id/logs', (req,res) => {
     date.$lte = to;
     respDate.to = new Date(to).toDateString()
   }
-  // console.log(Object.keys(date).length)
+  console.log(Object.keys(date).length)
   if(Object.keys(date).length !== 0){
-    filter.dateObj = date
+    filter.date = date
   }
   if(req.query.limit && req.query.limit != 0){
-    limit = req.query.limit
+    limit.limit = req.query.limit
     console.log("NOT NOL")
   }
   // console.log("limit",limit)
   // console.log("filter",filter)
   try{
-     User.findById(_id, "_id username",  (err,data) => {
+     User.findById({_id : _id}, "_id username")
+      .populate("exercises"," description duration date ",filter,limit).exec((err,data) => {
       if(err){
         console.log(err)
       }else{
-      Exercise.find({user : data._id, ...filter},'-_id description duration date').limit(limit).exec((err1,data1) => {
+        console.log(data)
+        let exercises = data.exercises
+        if(exercises.length !== 0){
+          exercises = exercises.map((e) => ({
+            description: e.description,
+            duration : e.duration,
+            date : new Date(e.date).toDateString(),
+          }));
+        }
+        
         resp = {
           username: data.username,
-          count: data1.length,
+          count: data.exercises.length,
           _id: _id,
-          ...respDate,
-          log: data1
+          log: exercises,
+          ...respDate
         }
         return res.json(resp)
-        })
       }
     })
   }
