@@ -14,7 +14,6 @@ app.use(bodyParser.json());
 
 /////////////////////////////////////
 
-
 //Set Mongoose
 const mongoose = require('mongoose');
 // mongoose.Promise = global.Promise;
@@ -23,15 +22,18 @@ const { Schema } = mongoose;
 
 const userSchema = new Schema({
   username : { type : String, required: true, unique: true },
-  log : [{
-    _id : false,
-    description: { type : String, required: true },
-    duration: { type : Number, required: true },
-    date : { type : Date, required: true }
-  }]
+  exercises : [{ type: Schema.Types.ObjectId, ref: 'Exercise'}]
+});
+const exerciseSchema = new Schema({
+  user: {type : Schema.Types.ObjectId, ref: "User"},
+  description: { type : String, required: true },
+  duration: { type : Number, required: true },
+  dateObj: { type : Date, required: true },
+  date : { type : String, required: true }
 });
 
 let User = mongoose.model('User', userSchema);
+let Exercise = mongoose.model('Exercise', exerciseSchema);
 
 // Route
 app.use(function(req, res, next) {
@@ -56,14 +58,8 @@ app.post('/api/users', (req,res) => {
           message : "user already exist"
         })
       }else{
-        console.log({
-          username : data.username,
-          _id : data._id
-        })
-        return res.json({
-          username : data.username,
-          _id : data._id
-        });
+        console.log(data)
+        return res.json(data);
       }
     })
   }
@@ -97,27 +93,47 @@ app.post('/api/users/:_id/exercises', (req,res) => {
   }else{
     date = new Date(req.body.date).toDateString()
   }
-
-  let exercise = {}
-  exercise.description = description;
-  exercise.duration = duration;
-  exercise.date = date;
-  User.findByIdAndUpdate(_id, 
-    { $push : { log : exercise } },
-    { new: true, useFindAndModify: false }, 
-    (err,data) => {
+  User.findById(_id, (err,data) => {
     if(err){
       console.log(err)
       return res.json(err)
     }else{
       console.log(data)
-      return res.json({           
-        _id : data._id,   
-        username : data.username,
-        date : date,
-        duration : parseInt(duration),
-        description : description,
-      })
+      if(data !== null){
+        let exercise = new Exercise()
+        exercise.description = description;
+        exercise.duration = duration;
+        exercise.date = date;
+        exercise.dateObj = date;
+        exercise.user = data._id;
+        exercise.save((err1,data1) => {
+          if(err1){
+            cosnole.log(err1)
+          }
+          else{
+            console.log(data1)
+            User.findByIdAndUpdate(
+              _id,
+              { $push : { exercises : data1._id } },
+              { new: true, useFindAndModify: false },
+              (err2 , data2) => {
+                if(err2){
+                  console.log(err2);
+                }else{
+                  console.log(data2)
+                }
+              }
+            )
+            return res.json({           
+              _id : data._id,   
+              username : data.username,
+              date : date,
+              duration : data1.duration,
+              description : data1.description,
+            })
+          }
+        })
+      }
     }
   })
 })
@@ -132,19 +148,19 @@ app.get('/api/users/:_id/logs', (req,res) => {
   let respDate = {}
   // {date: { $gte: from, $lte: to }}
   if(req.query.from){
-    from = new Date(req.query.from);
+    from = req.query.from;
     date.$gte  = from;
-    respDate.from = from.toDateString()
+    respDate.from = new Date(from).toDateString()
   }
 
   if(req.query.to){
-    to = new Date(req.query.to)
+    to = req.query.to
     date.$lte = to;
-    respDate.to = to.toDateString()
+    respDate.to = new Date(to).toDateString()
   }
   // console.log(Object.keys(date).length)
   if(Object.keys(date).length !== 0){
-    filter.date = date
+    filter.dateObj = date
   }
   if(req.query.limit && req.query.limit != 0){
     limit = req.query.limit
@@ -152,79 +168,44 @@ app.get('/api/users/:_id/logs', (req,res) => {
   }
   // console.log("limit",limit)
   // console.log("filter",filter)
-
-try{
-     User.findById(_id,"_id username log").exec((err,data) => {
+  try{
+     User.findById(_id, "_id username",  (err,data) => {
       if(err){
         console.log(err)
       }else{
-
-      let log = data.log
-      if (from){
-        log = log.filter(l => l.date >= from)
-      }
-
-      if (to){
-        log = log.filter(l => l.date <= to)
-      }
-        
-      if(limit){
-        log = log.slice(0,limit)
-      }
-
-      if(log.length !== 0){
-        log = log.map((l) => ({
-          description: l.description,
-          duration : l.duration,
-          date : new Date(l.date).toDateString(),
-        }));
-      }
-
+      Exercise.find({user : data._id, ...filter},'-_id description duration date').limit(limit).exec((err1,data1) => {
         resp = {
           username: data.username,
-          count: log.length,
+          count: data1.length,
           _id: _id,
           ...respDate,
-          log: log
+          log: data1
         }
-        
-      // console.log(resp)
-      return res.json(resp)
+        return res.json(resp)
+        })
       }
     })
   }
   catch(e){
     console.log(e)
   }
-  
-  // try{
-  //    User.findById(_id, "_id username ",  (err,data) => {
-  //     if(err){
-  //       console.log(err)
-  //     }else{
-  //     Exercise.find({user : data._id, ...filter},'-_id description duration date').limit(limit).exec((err1,data1) => {
-  //       resp = {
-  //         username: data.username,
-  //         count: data1.length,
-  //         _id: _id,
-  //         ...respDate,
-  //         log: data1
-  //       }
-  //       return res.json(resp)
-  //       })
-  //     }
-  //   })
-  // }
-  // catch(e){
-  //   console.log(e)
-  // }
+  // Exercise.findById(_id)
+  //   .populate('user')
+  //   .exec((err,data) => {
+  //   if(err){
+  //     console.log(err)
+  //   }else{
+  //     console.log(data)
+  //     return res.json(data)
+  //   }
+  // })
 })
 
 
 
 
 module.exports = {
-    User
+    User, Exercise,
   }
 /////////////////////////////////////
 
